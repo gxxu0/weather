@@ -4,51 +4,47 @@ name: CI
 
 # Controls when the workflow will run
 on:
-  # Triggers the workflow on push or pull request events but only for the "main" branch
+  # 지정한 branch에서 push/pull_request 에 해당하는 command가 수행되면 이 workflow가 동작 합니다. 
+  # 여기서는 간단히 main 브런치에서 push되면서 이 workflow가 실행 되도록 하겠습니다.
   push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-
-  # Allows you to run this workflow manually from the Actions tab
+    branches: [ main ] 
+ 
+  # 이부분은 위의 trigger가 없어도 수동으로 동작 할 수 있게끔 해주는 역할을 합니다.
   workflow_dispatch:
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  # This workflow contains a single job called "build"
+  # This workflow contains a single job called "build" 
   build:
-    # The type of runner that the job will run on
     runs-on: ubuntu-latest
-
-    # Steps represent a sequence of tasks that will be executed as part of the job
+    
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v3
+    # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+    - name: checkout release
+      uses: actions/checkout@v3
 
-      - name: SHOW AWS CLI VERSION
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_EC2_METADATA_DISABLED: true
-          run: |
-            aws --version
-      # Runs a single command using the runners shell
-      - name: Run a one-line script
-        run: echo Hello, world!
-
-      - name: Sync Bucket
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_EC2_METADATA_DISABLED: true
-        run: |
-          aws s3 sync \
-            --region ap-northeast-2 \ 
-            build s3://fe-63-shinnh2-s3 \
-            --delete
-        working-directory: ./my-agora-states-client
-      # Runs a set of commands using the runners shell
-      - name: Run a multi-line script
-        run: |
-          echo Add other actions to build,
-          echo test, and deploy your project.
+    # Runs a single command using the runners shell 
+    - name: Clean temp directory
+      run: |
+        rm -rf *
+        cp -r $GITHUB_WORKSPACE . 
+      
+    - name: archive drcloud 
+      run: tar cvfz ./drcloud.tar.gz *
+       
+    - name: AWS configure credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.ACCESS_KEY }}
+        aws-secret-access-key: ${{ secrets.SECRET_KEY }}
+        aws-region: ap-northeast-2
+        
+    - name: upload to S3
+      run: aws s3 cp --region ap-northeast-2 ./drcloud.tar.gz s3://github-action-codedeploy-s3/archive/
+      
+    - name: deploy with AWS codeDeploy
+      run: aws deploy create-deployment
+        --application-name githubaction-test
+        --deployment-config-name CodeDeployDefault.OneAtATime
+        --deployment-group-name githubaction-test-group
+        --s3-location bucket=github-action-codedeploy-s3,bundleType=tgz,key=archive/drcloud.tar.gz
